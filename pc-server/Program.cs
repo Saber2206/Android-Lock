@@ -50,7 +50,7 @@ else
 
 // 3) فحص: هل العتاد يدعم وضع الخادم؟
 Console.WriteLine($"[INFO] LE Peripheral mode     : {(adapter.IsPeripheralRoleSupported ? "SUPPORTED" : "NOT SUPPORTED")}");
-Console.WriteLine($"[INFO] LE Advertising         : {(adapter.IsAdvertiseSupported ? "SUPPORTED" : "NOT SUPPORTED")}");
+
 
 if (!adapter.IsPeripheralRoleSupported)
 {
