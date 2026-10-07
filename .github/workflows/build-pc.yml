@@ -1,0 +1,36 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: تحميل الكود
+        uses: actions/checkout@v4
+
+      - name: تثبيت .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: بناء EXE مستقل
+        run: >
+          dotnet publish pc-server
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -o out
+
+      - name: رفع الملف
+        uses: actions/upload-artifact@v4
+        with:
+          name: PC-Lock-Server-EXE
+          path: out/PcLockServer.exe
