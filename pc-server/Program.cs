@@ -1,11 +1,11 @@
 // ============================================================
-//  PC-Lock Server — شغّله على الكمبيوتر واترك النافذة مفتوحة
-//  يستقبل أوامر القفل من تطبيق الهاتف عبر البلوتوث (BLE)
+//  PC-Lock Server v1.1 (تشخيصي — يطبع سبب المشاكل)
 // ============================================================
 
 using System.Runtime.InteropServices;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Bluetooth.GenericAttributeProfile;
+using Windows.Devices.Radios;
 using Windows.Storage.Streams;
 
 const string SERVICE_UUID = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d";
@@ -15,21 +15,54 @@ Console.OutputEncoding = System.Text.Encoding.UTF8;
 Console.Title = "PC-Lock Server";
 
 Console.WriteLine("============================================");
-Console.WriteLine("            PC-Lock Server v1.0");
+Console.WriteLine("        PC-Lock Server v1.1 (diag)");
 Console.WriteLine("    Remote PC lock via Bluetooth (BLE)");
 Console.WriteLine("============================================\n");
 
-// 1) التأكد من وجود البلوتوث
+// 1) فحص الأدابتر
 var adapter = await BluetoothAdapter.GetDefaultAsync();
 if (adapter is null)
 {
-    Console.WriteLine("[ERROR] No Bluetooth adapter found. Enable Bluetooth and restart.");
+    Console.WriteLine("[ERROR] No Bluetooth adapter found.");
     Console.ReadKey();
     return;
 }
-Console.WriteLine("[OK] Bluetooth adapter ready");
+Console.WriteLine("[OK] Bluetooth adapter found");
 
-// 2) إنشاء خدمة GATT
+// 2) فحص: هل البلوتوث مفعّل؟
+var radios = await Radio.GetRadiosAsync();
+var btRadio = radios.FirstOrDefault(r => r.Kind == RadioKind.Bluetooth);
+if (btRadio is null)
+{
+    Console.WriteLine("[WARN] No Bluetooth radio detected (unusual).");
+}
+else
+{
+    Console.WriteLine($"[INFO] Bluetooth radio state : {btRadio.State}");
+    if (btRadio.State != RadioState.On)
+    {
+        Console.WriteLine("[PROBLEM] Bluetooth is OFF!");
+        Console.WriteLine(">> Turn it ON: Settings > Bluetooth & devices, then run again.");
+        Console.ReadKey();
+        return;
+    }
+}
+
+// 3) فحص: هل العتاد يدعم وضع الخادم؟
+Console.WriteLine($"[INFO] LE Peripheral mode     : {(adapter.IsPeripheralRoleSupported ? "SUPPORTED" : "NOT SUPPORTED")}");
+Console.WriteLine($"[INFO] LE Advertising         : {(adapter.IsAdvertiseSupported ? "SUPPORTED" : "NOT SUPPORTED")}");
+
+if (!adapter.IsPeripheralRoleSupported)
+{
+    Console.WriteLine();
+    Console.WriteLine("[PROBLEM] This Bluetooth adapter CANNOT act as a BLE Peripheral.");
+    Console.WriteLine(">> Fix 1: Update the Bluetooth driver (Windows Update / Device Manager).");
+    Console.WriteLine(">> Fix 2: Use a USB Bluetooth 5.0+ dongle that supports LE Peripheral mode.");
+    Console.ReadKey();
+    return;
+}
+
+// 4) إنشاء خدمة GATT
 var providerResult = await GattServiceProvider.CreateAsync(Guid.Parse(SERVICE_UUID));
 if (providerResult.Error != BluetoothError.Success)
 {
@@ -55,7 +88,7 @@ if (charResult.Error != BluetoothError.Success)
 }
 var characteristic = charResult.Characteristic;
 
-// 3) استقبال أوامر الهاتف
+// 5) استقبال أوامر الهاتف
 characteristic.WriteRequested += (sender, args) =>
 {
     var deferral = args.GetDeferral();
@@ -89,7 +122,6 @@ characteristic.WriteRequested += (sender, args) =>
                 }
             }
 
-            // نرد على الهاتف فقط إذا كان الطلب من نوع "كتابة مع رد"
             if (request.Option == GattWriteOption.WriteWithResponse)
                 request.Respond();
         }
@@ -104,25 +136,37 @@ characteristic.WriteRequested += (sender, args) =>
     });
 };
 
-// 4) إشعار إذا توقف الإعلان عن نفسه
 serviceProvider.AdvertisementStatusChanged += (s, e) =>
 {
     if (e.Status == GattServiceProviderAdvertisementStatus.Aborted)
-        Console.WriteLine("[ERROR] Advertising aborted — close other Bluetooth apps and restart.");
+        Console.WriteLine("\n[ERROR] Advertising aborted unexpectedly.");
 };
 
-// 5) بدء الإعلان عن نفسه
+// 6) بدء البث ثم التحقق بعد 3 ثوانٍ
+await Task.Delay(500);
+
 serviceProvider.StartAdvertising(new GattServiceProviderAdvertisingParameters
 {
     IsDiscoverable = true,
     IsConnectable = true,
 });
 
-Console.WriteLine("[OK] Server is running and waiting for your phone...");
+await Task.Delay(3000);
+
+if (serviceProvider.AdvertisementStatus != GattServiceProviderAdvertisementStatus.Started)
+{
+    Console.WriteLine($"[PROBLEM] Advertising failed (status: {serviceProvider.AdvertisementStatus}).");
+    Console.WriteLine(">> Try: 1) Toggle Bluetooth OFF then ON");
+    Console.WriteLine(">>      2) Restart the PC");
+    Console.WriteLine(">>      3) Make sure only ONE copy of this app runs");
+    Console.WriteLine(">>      4) Close other Bluetooth apps, then retry.");
+    Console.ReadKey();
+    return;
+}
+
+Console.WriteLine("[OK] Advertising started — waiting for your phone...");
 Console.WriteLine($"[OK] Service UUID: {SERVICE_UUID}");
-Console.WriteLine("\nNOTE: The PC will appear in the app under its computer");
-Console.WriteLine("name (e.g. DESKTOP-XXXXXX). Keep this window OPEN!");
-Console.WriteLine("\nPress Q to quit.");
+Console.WriteLine("\nKeep this window OPEN. Press Q to quit.");
 Console.WriteLine("--------------------------------------------");
 
 while (true)
@@ -134,7 +178,6 @@ while (true)
 serviceProvider.StopAdvertising();
 Console.WriteLine("\nServer stopped. Bye!");
 
-// استدعاء دالة ويندوز لقفل الشاشة
 static class NativeMethods
 {
     [DllImport("user32.dll", SetLastError = true)]
