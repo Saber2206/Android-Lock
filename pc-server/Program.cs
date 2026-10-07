@@ -27,7 +27,7 @@ if (adapter is null)
     Console.ReadKey();
     return;
 }
-Console.WriteLine($"[OK] Bluetooth adapter ready ({adapter.BluetoothAddress:X12})");
+Console.WriteLine("[OK] Bluetooth adapter ready");
 
 // 2) إنشاء خدمة GATT
 var providerResult = await GattServiceProvider.CreateAsync(Guid.Parse(SERVICE_UUID));
@@ -64,6 +64,8 @@ characteristic.WriteRequested += (sender, args) =>
         try
         {
             var request = await args.GetRequestAsync();
+            if (request is null) return;
+
             var reader = DataReader.FromBuffer(request.Value);
             var data = new byte[reader.UnconsumedBufferLength];
             reader.ReadBytes(data);
@@ -72,7 +74,7 @@ characteristic.WriteRequested += (sender, args) =>
             {
                 switch (data[0])
                 {
-                    case 0x01: // LOCK
+                    case 0x01: // قفل
                         Console.WriteLine($"\n[{DateTime.Now:HH:mm:ss}] LOCK command received from phone");
                         bool ok = NativeMethods.LockWorkStation();
                         Console.WriteLine(ok
@@ -80,14 +82,15 @@ characteristic.WriteRequested += (sender, args) =>
                             : "[ERROR] Failed to lock");
                         break;
 
-                    case 0x02: // UNLOCK
+                    case 0x02: // فتح
                         Console.WriteLine($"\n[{DateTime.Now:HH:mm:ss}] UNLOCK command received");
                         Console.WriteLine(">> Use Windows Hello (fingerprint / PIN) on the PC to sign in.");
                         break;
                 }
             }
 
-            if (request.State == GattWriteRequestState.Pending)
+            // نرد على الهاتف فقط إذا كان الطلب من نوع "كتابة مع رد"
+            if (request.Option == GattWriteOption.WriteWithResponse)
                 request.Respond();
         }
         catch (Exception ex)
@@ -101,17 +104,7 @@ characteristic.WriteRequested += (sender, args) =>
     });
 };
 
-// 4) سجل حالة الاتصال
-if (serviceProvider.Session is not null)
-{
-    serviceProvider.Session.SessionStatusChanged += (s, e) =>
-    {
-        Console.WriteLine(e.SessionStatus == GattSessionStatus.Active
-            ? $"\n[{DateTime.Now:HH:mm:ss}] Phone CONNECTED"
-            : $"\n[{DateTime.Now:HH:mm:ss}] Phone disconnected");
-    };
-}
-
+// 4) إشعار إذا توقف الإعلان عن نفسه
 serviceProvider.AdvertisementStatusChanged += (s, e) =>
 {
     if (e.Status == GattServiceProviderAdvertisementStatus.Aborted)
